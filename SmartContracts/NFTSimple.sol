@@ -2,8 +2,8 @@
 pragma solidity >=0.4.24 <=0.5.6;
 
 contract NFTSimple {
-    string public name = "KlayLion";
-    string public symbol = "KL";
+    string public name = "KlayBooks";
+    string public symbol = "KB";
     
     mapping (uint256 => address) public tokenOwner;
     mapping (uint256 => string) public tokenURIs;
@@ -12,18 +12,29 @@ contract NFTSimple {
     mapping(address => uint256[]) private _ownedTokens;
     // onKIP17Received bytes value
     bytes4 private constant _KIP17_RECEIVED = 0x6745782b;
-    // mint(tokenId, uri, owner)
-    // transferFrom(from, to, tokenId) -> owner가 바뀌는 것(from -> to)
+
+    ///////////////////////////////////////////////////////
+
+    mapping (uint256 => address) public tokenLender;
+    mapping (uint256 => string) private contentsURIs;
+    
+    mapping(address => uint256[]) private _lendedTokens;
+    
+    ///////////////////////////////////////////////////////
 
     function mintWithTokenURI(address to, uint256 tokenId, string memory tokenURI) public returns (bool) {
         // to 에게 tokenId(일련번호)를 발행한다.
         // 적힐 글자는 tokenURI
         tokenOwner[tokenId] = to;
         tokenURIs[tokenId] = tokenURI;
+        
+        // 적힐 글자는 실제 컨텐츠의 <CID> --> ex) "ipfs://..."
+        contentsURIs[tokenId] = contentsURI;
 
         // add token to the list
         _ownedTokens[to].push(tokenId);
     }
+    
 
     function safeTransferFrom(address from, address to, uint256 tokenId, bytes memory _data) public {
         require(from == msg.sender, "from != msg.sender");
@@ -38,6 +49,18 @@ contract NFTSimple {
         require(
             _checkOnKIP17Received(from, to, tokenId, _data), "KIP17 : transfer to non KIP17Receiver implementer"
         );
+    }
+    
+    function safeLendingFrom(address from, address to, uint256 tokenId, bytes memory _data) public {
+        require(from == msg.sender, "from != msg.sender");
+        require(from == tokenOwner[tokenId], "you are not the owner of the token");
+        require(from != tokenLender[tokenId], "you are already lended");
+        //
+
+        _lendedTokens[to].push(tokenId);
+        //
+        tokenLender[tokenId] = to;
+
     }
 
     function _checkOnKIP17Received(address from, address to, uint256 tokenId, bytes memory _data) internal returns (bool) {
@@ -95,15 +118,25 @@ contract NFTSimple {
     function setTokenURI(uint256 id, string memory uri) public {
         tokenURIs[id] = uri;
     }
+    
+    function getContents(address from, uint256 tokenId) public view returns (string memory) {
+
+        require(tokenLender[tokenId] == from || tokenOwner[tokenId] == from, "You don't have permmission");     
+
+        return contentsURIs[tokenId];
+    }
+    
+    
 }
 
 contract NFTMarket {
     mapping(uint256 => address) public seller;
+    mapping(uint256 => address) public lender;
 
     function buyNFT(uint256 tokenId, address NFTAddress) public payable returns (bool) {
         // 구매한 사람한테 0.01 KLAY 전송
         address payable receiver = address(uint160(seller[tokenId]));
-
+        
         // Send 0.01 KLAY ot receiver
         // 10 ** 18 PEB = 1 KLAY
         // 10 ** 16 PEB = 0.01 KLAY
@@ -113,6 +146,24 @@ contract NFTMarket {
 
         return true;
     }
+    
+    function rentalNFT(uint256 tokenId, address NFTAddress) public payable returns (bool) {
+        require(msg.sender != seller[tokenId], "You are the seller");
+        // 구매한 사람한테 0.01 KLAY 전송
+        address payable receiver = address(uint160(seller[tokenId]));
+
+        // Send 0.01 KLAY ot receiver
+        // 10 ** 18 PEB = 1 KLAY
+        // 10 ** 16 PEB = 0.01 KLAY
+        receiver.transfer(10 ** 16);
+
+        NFTSimple(NFTAddress).safeLendingFrom(address(this), msg.sender, tokenId, '0x00');
+
+        lender[tokenId] = msg.sender;
+
+        return true;
+    }
+    
 
     // Market이 토큰을 받았을 때(판매대에 올라갔을 때), 판매자가 누구인지 기록해야함
      function onKIP17Received(address operator, address from, uint256 tokenId, bytes memory data) public returns (bytes4) {
